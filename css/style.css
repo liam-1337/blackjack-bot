@@ -29,8 +29,37 @@ canvas {
     position: absolute;
     bottom: 50px;
     left: 10px;
-    min-width: 150px;
+    min-width: 200px; /* Increased min-width for multiple hands */
+    max-height: 150px; /* Added max-height */
+    overflow-y: auto;  /* Scroll if many hands */
 }
+
+#player-hands-container { /* Container for individual hand divs */
+    /* No specific styles needed yet, but can add margin/padding if desired */
+}
+
+.player-hand-display {
+    border: 1px solid #ccc;
+    padding: 5px;
+    margin-bottom: 5px;
+    border-radius: 3px;
+    background-color: rgba(255, 255, 255, 0.1); /* Slightly lighter background for each hand */
+}
+
+.player-hand-display.active {
+    border-color: #ffc107; /* Highlight for active hand */
+    background-color: rgba(255, 243, 205, 0.3); /* Lighter yellow, more transparent */
+    color: #000; /* Darker text for active hand if background is light */
+}
+.player-hand-display.active p,
+.player-hand-display.active h5 { /* Assuming h5 or similar for hand title */
+    color: #000; /* Ensure text within active hand is readable */
+}
+
+
+.player-hand-display p { margin: 2px 0; font-size: 0.9em; }
+.player-hand-display h5 { margin: 3px 0 2px 0; font-size: 0.95em;} /* For Hand X title */
+
 
 #dealer-info {
     position: absolute;
@@ -105,6 +134,14 @@ canvas {
     background-color: #7b1fa2;
 }
 
+#surrender-button {
+    background-color: #607d8b; /* Blue Grey for Surrender */
+}
+
+#surrender-button:hover {
+    background-color: #546e7a;
+}
+
 #insurance-prompt {
     position: absolute;
     top: 50%;
@@ -150,10 +187,59 @@ canvas {
     background-color: #d32f2f;
 }
 
-/* #insurance-bet-info is already styled as .info-panel, positioning done inline in HTML for now */
-/* Additional specific styles if needed:
-#insurance-bet-info {
-    top: 10px;
-    right: 10px;
+/* #insurance-bet-info is already styled as .info-panel */
+#insurance-bet-info { /* Ensure it's distinct if needed */
+    /* Example: background-color: rgba(0, 0, 100, 0.6); */
 }
-*/
+
+#player-balance-panel {
+    /* Already uses .info-panel, specific positioning in HTML. */
+    /* Example: background-color: rgba(100, 0, 0, 0.6); */
+}
+
+#player-list-panel {
+    position: absolute;
+    top: 70px;
+    right: 10px;
+    width: 220px;
+    max-height: 200px;
+    overflow-y: auto;
+    /* Uses .info-panel styles for background, padding, border-radius */
+}
+#player-list {
+    list-style-type: none;
+    padding: 0;
+    margin: 0;
+}
+#player-list li {
+    padding: 3px 5px;
+    border-bottom: 1px solid #555;
+    font-size: 0.9em;
+}
+#player-list li:last-child {
+    border-bottom: none;
+}
+#player-list .current-player-highlight {
+    font-weight: bold;
+    color: #ffc107;
+}
+#table-status-message {
+    /* Styles can be added here if not sufficiently covered by inline/parent */
+}
+
+#game-log-content p {
+    margin: 0 0 3px 0;
+    padding: 0;
+    word-wrap: break-word;
+}
+
+#player-list li.remote-active-player-highlight {
+    background-color: #4a5568;
+    color: #e2e8f0;
+}
+
+#player-list li.current-player-highlight {
+    font-weight: bold;
+    color: #ffc107;
+    background-color: #3a3f47;
+}

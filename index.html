@@ -4,36 +4,50 @@
     <meta charset="utf-8">
     <title>Three.js App</title>
     <link rel="stylesheet" href="css/style.css">
+    <script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="js/deck.js"></script>
-    <script src="js/game.js"></script>
+    <!-- game.js is now server-side only for its core logic -->
+    <!-- <script src="js/game.js"></script> -->
     <script src="js/main.js"></script>
 
     <div id="ui-container">
         <div id="player-info" class="info-panel">
-            <h2>Player</h2>
-            <p>Hand: <span id="player-cards"></span></p>
-            <p>Value: <span id="player-value"></span></p>
+            <h4>Player Hands:</h4>
+            <div id="player-hands-container">
+                <!-- Player hands will be dynamically inserted here -->
+            </div>
         </div>
         <div id="dealer-info" class="info-panel">
             <h2>Dealer</h2>
             <p>Hand: <span id="dealer-cards"></span></p>
             <p>Value: <span id="dealer-value"></span></p>
         </div>
-        <div id="bet-info" class="info-panel">
-            <p>Current Bet: <span id="bet-amount"></span></p>
+        <div id="bet-info" class="info-panel"> <!-- Ensured class is correct -->
+            <p>Current Bet: <span id="bet-amount">0</span></p>
         </div>
         <div id="message-area" class="info-panel">
-            <p><span id="game-message">Welcome to 3D Blackjack!</span></p>
+            <h4>Game Log</h4>
+            <div id="game-log-content" style="max-height: 120px; overflow-y: scroll; padding: 5px; border: 1px solid #444; background-color: #282c34; font-size: 0.85em; line-height: 1.4;">
+                <!-- Messages will be appended here -->
+            </div>
         </div>
         <div id="action-buttons">
-            <button id="hit-button">Hit</button>
-            <button id="stand-button">Stand</button>
-            <button id="double-button">Double Down</button>
-            <button id="split-button">Split</button>
-            <button id="new-game-button" style="display:none;">New Game</button>
+            <!-- Betting controls, initially hidden -->
+            <div id="betting-controls" style="display:none; margin-bottom: 10px;">
+                <label for="bet-amount-input">Bet:</label>
+                <input type="number" id="bet-amount-input" value="10" min="5" step="5" style="width: 80px; margin-right: 5px;">
+                <button id="place-bet-button">Place Bet</button>
+            </div>
+
+            <button id="hit-button" style="display:none;">Hit</button>
+            <button id="stand-button" style="display:none;">Stand</button>
+            <button id="double-button" style="display:none;">Double Down</button>
+            <button id="split-button" style="display:none;">Split</button>
+            <button id="surrender-button" style="display:none;">Surrender</button>
+            <button id="new-game-button">New Game / Ready</button>
         </div>
     </div>
 
@@ -44,6 +58,14 @@
     </div>
     <div id="insurance-bet-info" class="info-panel" style="display: none; position: absolute; top: 10px; right: 10px;">
         Insurance Bet: <span id="insurance-bet-amount">0</span>
+    </div>
+    <div id="player-balance-panel" class="info-panel" style="position: absolute; bottom: 200px; left: 10px;">
+        Player Balance: <span id="player-balance-amount">1000</span>
+    </div>
+    <div id="player-list-panel" class="info-panel">
+        <h4>Players at Table</h4>
+        <ul id="player-list"></ul>
+        <p id="table-status-message" style="font-size: 0.9em; margin-top: 5px;"></p>
     </div>
 </body>
 </html>

@@ -65,6 +65,19 @@ class Card {
         }
         return parseInt(this.rank); // For ranks "2" through "10"
     }
+
+    /**
+     * Returns a plain object representation of the card, suitable for sending over network.
+     * @returns {{rank: string, suit: string, value: number, texturePath: string}}
+     */
+    toPlainObject() {
+        return {
+            rank: this.rank,
+            suit: this.suit,
+            value: this.getValue(), // May not be needed by client if score is sent
+            faceTexturePath: this.faceTexturePath // Client needs this for rendering
+        };
+    }
 }
 
 /**
@@ -138,3 +151,5 @@ class Deck {
         return this.cards.length >= count;
     }
 }
+
+module.exports = { Card, Deck };
