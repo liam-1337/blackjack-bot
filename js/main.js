@@ -103,10 +103,6 @@ const skyboxTexture = cubeTextureLoader.load(
     }
 );
 
-// Global audio buffer cache
-const audioBufferCache = {};
-let listener; // Will be initialized with the camera in Scene Setup
-
 // --- Client-Side Game State Representation ---
 let clientGameData = { /* ... (as before, including allPlayersList, activePlayerSeat, activePlayerId, gameState) ... */
     mySeat: -1, activeHandIndex: 0, playerBalance: 1000,
@@ -876,7 +872,60 @@ const uiUpdaters={
 };
 
 // --- Socket.IO Connection ---
-function initializeSocketConnection() { /* ... (event handlers updated below) ... */
+function initializeSocketConnection() {
+    // Ambient Sound Setup
+    if (listener) { // Ensure listener is initialized
+        const ambientSound = new THREE.Audio(listener);
+        const audioLoaderAmbient = new THREE.AudioLoader();
+
+        audioLoaderAmbient.load('sounds/ambient_casino.mp3', function(buffer) {
+            // Use cache for ambient sound
+            if (audioBufferCache['sounds/ambient_casino.mp3']) {
+                 ambientSound.setBuffer(audioBufferCache['sounds/ambient_casino.mp3']);
+            } else {
+                audioBufferCache['sounds/ambient_casino.mp3'] = buffer;
+                ambientSound.setBuffer(buffer);
+            }
+            ambientSound.setLoop(true);
+            ambientSound.setVolume(0.15); // Subtle volume
+
+            try {
+                if (listener.context.state === 'suspended') {
+                    console.log("AudioContext suspended. Ambient sound will attempt to play after user interaction elsewhere.");
+                    // Add a one-time event listener to the document to resume audio context on any user interaction
+                    const resumeAudio = () => {
+                        if (listener.context.state === 'suspended') {
+                            listener.context.resume().then(() => {
+                                console.log("AudioContext resumed by user interaction for ambient sound.");
+                                if (!ambientSound.isPlaying) ambientSound.play();
+                            }).catch(e => console.warn("Error resuming AudioContext on interaction for ambient sound:", e));
+                        }
+                        // Remove the event listener after it has done its job
+                        document.removeEventListener('click', resumeAudio, { capture: true, once: true });
+                        document.removeEventListener('keydown', resumeAudio, { capture: true, once: true });
+                    };
+                    document.addEventListener('click', resumeAudio, { capture: true, once: true });
+                    document.addEventListener('keydown', resumeAudio, { capture: true, once: true });
+                     // Attempt to play if context is NOT suspended, in case it resumed for other reasons or was never suspended.
+                    if (listener.context.state !== 'suspended' && !ambientSound.isPlaying) {
+                        ambientSound.play();
+                    }
+                } else {
+                    if (!ambientSound.isPlaying) ambientSound.play();
+                    console.log("Ambient sound playing or will play once context is active.");
+                }
+            } catch (e) {
+                console.warn("Error trying to play ambient_casino.mp3 automatically:", e);
+            }
+
+        }, undefined, function(err) {
+            console.warn("Failed to load ambient sound 'sounds/ambient_casino.mp3':", err);
+        });
+    } else {
+        // This case should ideally not be reached if listener is initialized with camera.
+        console.warn("AudioListener not available when trying to set up ambient sound in initializeSocketConnection.");
+    }
+
     socket = io(SERVER_URL, { reconnectionAttempts: 5, timeout: 10000 });
     socket.on('connect', () => { console.log('Attempting to connect to server... Socket ID on connect (temporary):', socket.id); });
     socket.on('joined_table', (data) => { /* ... (as before, sets localPlayerSeat, clientGameData.allPlayersList) ... */
@@ -1315,3 +1364,5 @@ console.log("DEAL_START_POSITION set to:", DEAL_START_POSITION);
     *   The `uiUpdaters.updateDealer` was refined to more safely access `cardsArray[0].value` for the upcard score display.
 
 The client UI should now provide a scrolling game log for better message history and correctly highlight both the local player and the currently active remote player in the player list. These changes improve the user experience in a multiplayer context by making game flow and turn indication clearer.
+
+[end of js/main.js]
