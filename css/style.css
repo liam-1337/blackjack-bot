@@ -1,0 +1,159 @@
+body {
+    margin: 0;
+    font-family: Arial, sans-serif;
+}
+
+canvas {
+    display: block;
+}
+
+#ui-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* Allow clicks to pass through to canvas initially */
+    z-index: 10;
+    color: white;
+}
+
+.info-panel {
+    background-color: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 5px;
+    margin: 10px;
+}
+
+#player-info {
+    position: absolute;
+    bottom: 50px;
+    left: 10px;
+    min-width: 150px;
+}
+
+#dealer-info {
+    position: absolute;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 150px;
+    text-align: center;
+}
+
+#bet-info {
+    position: absolute;
+    bottom: 150px; /* Above player-info */
+    left: 10px;
+}
+
+#message-area {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background-color: rgba(0, 0, 0, 0.7);
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    min-width: 200px;
+}
+
+#action-buttons {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    pointer-events: all; /* Enable clicks on buttons */
+}
+
+#action-buttons button {
+    padding: 10px 20px;
+    margin: 0 5px;
+    border: none;
+    border-radius: 5px;
+    background-color: #4CAF50;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+}
+
+#action-buttons button:hover {
+    background-color: #45a049;
+}
+
+#action-buttons button:disabled {
+    background-color: #cccccc;
+    color: #666666;
+    cursor: not-allowed;
+}
+
+/* Specific style if needed for double button, otherwise it inherits */
+#double-button {
+    background-color: #ff9800; /* Orange for Double Down */
+}
+
+#double-button:hover {
+    background-color: #f57c00;
+}
+
+#split-button {
+    background-color: #9c27b0; /* Purple for Split */
+}
+
+#split-button:hover {
+    background-color: #7b1fa2;
+}
+
+#insurance-prompt {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -100%); /* Move it above the main message area */
+    background-color: rgba(30, 30, 70, 0.9); /* Dark blueish background */
+    padding: 20px;
+    border: 1px solid #aaa;
+    border-radius: 10px;
+    z-index: 20; /* Higher than other UI elements */
+    text-align: center;
+    color: white;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    pointer-events: all; /* Allow interaction with this prompt */
+}
+
+#insurance-prompt p {
+    margin-bottom: 15px;
+    font-size: 1.1em;
+}
+
+#insurance-prompt button {
+    padding: 10px 15px;
+    margin: 5px;
+    border-radius: 5px;
+    border: none;
+    cursor: pointer;
+}
+
+#take-insurance-button {
+    background-color: #4CAF50; /* Green */
+    color: white;
+}
+#take-insurance-button:hover {
+    background-color: #45a049;
+}
+
+#decline-insurance-button {
+    background-color: #f44336; /* Red */
+    color: white;
+}
+#decline-insurance-button:hover {
+    background-color: #d32f2f;
+}
+
+/* #insurance-bet-info is already styled as .info-panel, positioning done inline in HTML for now */
+/* Additional specific styles if needed:
+#insurance-bet-info {
+    top: 10px;
+    right: 10px;
+}
+*/
