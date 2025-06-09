@@ -1,0 +1,4 @@
+Placeholder for table felt texture.
+This file is a placeholder. Please replace it with an actual image file (e.g., a seamless green felt texture) for the blackjack table visuals.
+Ensure the image is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'textures/table/felt.png'.

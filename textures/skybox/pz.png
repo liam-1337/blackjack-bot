@@ -1,0 +1,4 @@
+Placeholder for skybox positive Z texture.
+This file is a placeholder. Please replace it with an actual image file for the positive Z face of the skybox.
+Ensure the image is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'textures/skybox/pz.png'.

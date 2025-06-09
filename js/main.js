@@ -1,5 +1,9 @@
 // js/main.js - Main script for Three.js scene setup, client-side game representation, UI event handling, and server communication.
 
+// Global audio buffer cache
+const audioBufferCache = {};
+let listener; // Will be initialized with the camera in Scene Setup
+
 // --- Server Connection ---
 const SERVER_URL = 'http://localhost:3000';
 let socket;
@@ -9,16 +13,26 @@ let maxPlayersAtTable = 6;
 let activePlayerMarker;
 
 // --- Constants ---
-const CHIP_RADIUS = 0.2, CHIP_HEIGHT = 0.05; /* ... */
+const CHIP_RADIUS = 0.2, CHIP_HEIGHT = 0.075; // Increased CHIP_HEIGHT from 0.05 to 0.075
 const CHIP_VALUES_COLORS = { 1:0xffffff, 5:0xff0000, 10:0x0000ff, 25:0x00ff00, 100:0x000000 };
 const CARD_WIDTH = 0.7, CARD_HEIGHT = 1, CARD_DEPTH = 0.02; /* ... */
 const TABLE_RADIUS = 2.8, TABLE_THICKNESS = 0.2, TABLE_Y_SURFACE = -1.0; /* ... */
+// Constants for the new blackjack table shape
+const BLACKJACK_TABLE_ARC_RADIUS = TABLE_RADIUS * 0.85;
+const BLACKJACK_TABLE_STRAIGHT_EDGE = TABLE_RADIUS * 1.2;
+const BLACKJACK_TABLE_FULL_THICKNESS = TABLE_THICKNESS; // Original full thickness for the table body/rim
+const BLACKJACK_TABLE_FELT_LAYER_THICKNESS = 0.02; // A thin layer for the felt on top
+
 const BETTING_AREA_RADIUS = 0.4, BETTING_AREA_THICKNESS = 0.01; /* ... */
 const BETTING_AREA_Y = TABLE_Y_SURFACE + BETTING_AREA_THICKNESS / 2 + 0.005; /* ... */
 const DEAL_START_POSITION = new THREE.Vector3(0, TABLE_Y_SURFACE + 0.7, -0.5); /* ... */
 const CARD_ANIMATION_SPEED = 0.08, CARD_FLIP_DURATION_FRAMES = 30; /* ... */
 const CARD_Y_ON_TABLE = TABLE_Y_SURFACE + CARD_DEPTH / 2 + 0.01; /* ... */
 const PLAYER_HAND_Z_BASE = 1.0; const PLAYER_HAND_X_SPREAD = 0.9; /* ... */
+// Chip Animation Start Position (relative to player area)
+const PLAYER_CHIP_START_POS_OFFSET = new THREE.Vector3(0, 0.3, 0.5); // Offset from player's calculated base position. Y is slightly above table, Z is further from table.
+const DEALER_CHIP_COLLECT_TARGET_POS = new THREE.Vector3(0, TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + CHIP_HEIGHT, BLACKJACK_TABLE_ARC_RADIUS * 0.7); // On dealer's side, slightly above felt.
+
 const baseSeatPositions = [ /* ... (as defined before) ... */
     new THREE.Vector3(-PLAYER_HAND_X_SPREAD * 2.2, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE + 0.3),
     new THREE.Vector3(-PLAYER_HAND_X_SPREAD * 1.1, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE),
@@ -46,6 +60,53 @@ const cardBackTexture = textureLoader.load(cardBackTexturePath,
 );
 const faceTextureCache = {};
 
+// Chip textures
+let chipEdgeTexture = null;
+const chipEdgeTexturePath = 'textures/chips/chip_edge_stripe.png';
+textureLoader.load(chipEdgeTexturePath,
+    (texture) => {
+        chipEdgeTexture = texture;
+        chipEdgeTexture.wrapS = chipEdgeTexture.wrapT = THREE.RepeatWrapping;
+        // Assuming the stripe texture is designed to repeat a few times around the edge
+        chipEdgeTexture.repeat.set(4, 1); // Repeat 4 times horizontally
+        console.log("Chip edge texture loaded successfully.");
+    },
+    undefined,
+    (err) => { console.warn(`Failed to load chip edge texture from ${chipEdgeTexturePath}. Chip edges will be plain. ${err.message}`); }
+);
+
+let chipFaceTexture = null;
+const chipFaceTexturePath = 'textures/chips/chip_face_generic.png';
+textureLoader.load(chipFaceTexturePath,
+    (texture) => {
+        chipFaceTexture = texture;
+        console.log("Chip face texture loaded successfully.");
+    },
+    undefined,
+    (err) => { console.warn(`Failed to load chip face texture from ${chipFaceTexturePath}. Chip faces will use color only. ${err.message}`);}
+);
+
+// Skybox textures
+const cubeTextureLoader = new THREE.CubeTextureLoader();
+cubeTextureLoader.setPath('textures/skybox/'); // Set base path for skybox textures
+
+const skyboxTexture = cubeTextureLoader.load(
+    ['px.png', 'nx.png', 'py.png', 'ny.png', 'pz.png', 'nz.png'], // Standard order: +X, -X, +Y, -Y, +Z, -Z
+    () => {
+        console.log("Skybox textures loaded successfully.");
+        scene.background = skyboxTexture; // Assign skybox texture on successful load initiation
+    },
+    undefined, // onProgress callback not needed
+    (err) => {
+        console.warn("Failed to load skybox textures. Scene will use fallback background color. Error:", err);
+        // Fallback to existing solid color background is handled by initial scene.background setting
+    }
+);
+
+// Global audio buffer cache
+const audioBufferCache = {};
+let listener; // Will be initialized with the camera in Scene Setup
+
 // --- Client-Side Game State Representation ---
 let clientGameData = { /* ... (as before, including allPlayersList, activePlayerSeat, activePlayerId, gameState) ... */
     mySeat: -1, activeHandIndex: 0, playerBalance: 1000,
@@ -61,12 +122,96 @@ let playerMeshes = {};
 let dealerMeshes = { cardMeshes: [] };
 
 // --- Utility Functions ---
-function createChipMesh(x,y,z,value){ /* ... (as before) ... */
-    const g=new THREE.CylinderGeometry(CHIP_RADIUS,CHIP_RADIUS,CHIP_HEIGHT,32);
-    const m=new THREE.MeshStandardMaterial({color:CHIP_VALUES_COLORS[value]||0x808080});
-    const c=new THREE.Mesh(g,m);c.position.set(x,y,z);return c;
+function playPositionalSound(soundPath, parentObject, volume = 0.7, loop = false, refDistance = 2, rolloffFactor = 2) {
+    if (!listener) {
+        console.warn("AudioListener not initialized. Cannot play positional sound.");
+        return;
+    }
+    if (!parentObject || !parentObject.add) {
+        console.warn("Cannot play positional sound: parentObject is invalid or undefined for sound:", soundPath);
+        return;
+    }
+
+    const positionalAudio = new THREE.PositionalAudio(listener);
+
+    if (audioBufferCache[soundPath]) {
+        // Use cached buffer
+        try {
+            positionalAudio.setBuffer(audioBufferCache[soundPath]);
+            positionalAudio.setRefDistance(refDistance);
+            positionalAudio.setRolloffFactor(rolloffFactor);
+            positionalAudio.setVolume(volume);
+            positionalAudio.setLoop(loop);
+            positionalAudio.position.set(0,0,0);
+            parentObject.add(positionalAudio);
+            if (positionalAudio.source && positionalAudio.source.buffer && positionalAudio.source.buffer.duration > 0) {
+                 positionalAudio.play();
+            } else {
+                 // This might happen if the buffer is not fully decoded/ready, though cache hit should mean it is.
+                 console.warn("Positional audio buffer from cache seems invalid for path:", soundPath);
+            }
+        } catch (e) {
+            console.error("Error playing cached positional sound:", soundPath, e);
+        }
+    } else {
+        // Load new buffer
+        const audioLoader = new THREE.AudioLoader();
+        audioLoader.load(soundPath, function(buffer) {
+            audioBufferCache[soundPath] = buffer; // Cache the buffer
+            try {
+                positionalAudio.setBuffer(buffer);
+                positionalAudio.setRefDistance(refDistance);
+                positionalAudio.setRolloffFactor(rolloffFactor);
+                positionalAudio.setVolume(volume);
+                positionalAudio.setLoop(loop);
+                positionalAudio.position.set(0,0,0);
+                parentObject.add(positionalAudio);
+                positionalAudio.play();
+            } catch (e) {
+                 console.error("Error playing new positional sound:", soundPath, e);
+            }
+        }, undefined, function(err) {
+            console.warn(`Error loading positional sound ${soundPath}:`, err);
+        });
+    }
 }
-function createCardMesh(cardObject, isFaceUp = true) { /* ... (as before, uses cardBackMaterial) ... */
+
+function createChipMesh(x,y,z,value){
+    const chipGeometry = new THREE.CylinderGeometry(CHIP_RADIUS, CHIP_RADIUS, CHIP_HEIGHT, 32);
+    const chipColor = CHIP_VALUES_COLORS[value] || 0x808080;
+
+    let edgeMaterial, topMaterial, bottomMaterial;
+
+    // Edge Material
+    if (chipEdgeTexture) {
+        edgeMaterial = new THREE.MeshStandardMaterial({ map: chipEdgeTexture.clone(), side: THREE.DoubleSide });
+        // Ensure the texture map is respected by making base color white if texture is present
+        edgeMaterial.color.set(0xffffff);
+    } else {
+        // Fallback for edge: a slightly darker version of the chip color, or a neutral grey
+        const darkerColor = new THREE.Color(chipColor).multiplyScalar(0.5);
+        edgeMaterial = new THREE.MeshStandardMaterial({ color: darkerColor, side: THREE.DoubleSide });
+    }
+
+    // Top/Bottom Face Material
+    if (chipFaceTexture) {
+        topMaterial = new THREE.MeshStandardMaterial({ map: chipFaceTexture.clone(), color: chipColor, side: THREE.DoubleSide });
+        bottomMaterial = new THREE.MeshStandardMaterial({ map: chipFaceTexture.clone(), color: chipColor, side: THREE.DoubleSide });
+    } else {
+        // Fallback for faces: just the chip color
+        topMaterial = new THREE.MeshStandardMaterial({ color: chipColor, side: THREE.DoubleSide });
+        bottomMaterial = new THREE.MeshStandardMaterial({ color: chipColor, side: THREE.DoubleSide });
+    }
+
+    // IMPORTANT: CylinderGeometry materials order: side, top, bottom
+    const materials = [edgeMaterial, topMaterial, bottomMaterial];
+    const chipMesh = new THREE.Mesh(chipGeometry, materials);
+    chipMesh.position.set(x,y,z);
+    chipMesh.castShadow = true;
+    chipMesh.receiveShadow = true; // Chips can receive shadows from cards or other taller objects
+    return chipMesh;
+}
+function createCardMesh(cardObject, isFaceUp = true) {
     const cardGeometry = new THREE.BoxGeometry(CARD_WIDTH, CARD_HEIGHT, CARD_DEPTH);
     let faceMaterialInstance;
     const texturePath = cardObject && cardObject.faceTexturePath ? cardObject.faceTexturePath : null;
@@ -83,12 +228,28 @@ function createCardMesh(cardObject, isFaceUp = true) { /* ... (as before, uses c
         [edgeMaterial,edgeMaterial,edgeMaterial,edgeMaterial,currentBackMaterial,faceMaterialInstance];
     const cardMesh=new THREE.Mesh(cardGeometry,materials);
     cardMesh.userData.card=cardObject;cardMesh.userData.isFaceUp=isFaceUp;
+    cardMesh.castShadow = true;
+    cardMesh.receiveShadow = false; // Cards are thin, less likely to receive distinct shadows on themselves
     return cardMesh;
 }
 const animatedObjects=[];
-function initiateCardAnimation(c,t,s){ /* ... (as before) ... */
-    c.position.copy(DEAL_START_POSITION);s.add(c);
-    animatedObjects.push({mesh:c,target:new THREE.Vector3().copy(t),isAnimating:true,speed:CARD_ANIMATION_SPEED,animationType:'deal'});
+function initiateCardAnimation(cardMesh,targetPositionVec,sceneRef){
+    cardMesh.position.copy(DEAL_START_POSITION);
+    sceneRef.add(cardMesh); // Ensure sceneRef is a valid THREE.Scene object
+    animatedObjects.push({
+        mesh:cardMesh,
+        target:new THREE.Vector3().copy(targetPositionVec),
+        isAnimating:true,
+        speed:CARD_ANIMATION_SPEED,
+        animationType:'deal'
+    });
+    // Play positional sound for card dealing
+    // Ensure cardMesh is a valid THREE.Object3D to attach sound
+    if (cardMesh && cardMesh.isObject3D) {
+      playPositionalSound('sounds/card_slide.mp3', cardMesh, 0.6, false, 4, 2);
+    } else {
+      console.warn("Cannot attach positional sound to card: cardMesh is invalid.", cardMesh);
+    }
 }
 function initiateCardFlip(cardMesh,onCompleteCallback){ /* ... (as before) ... */
     if(!cardMesh)return;
@@ -99,45 +260,212 @@ function initiateCardFlip(cardMesh,onCompleteCallback){ /* ... (as before) ... *
 function playSound(p){new Audio(p).play().catch(e=>console.warn(`Error playing sound ${p}:`,e));}
 
 // --- Scene Setup ---
-const scene=new THREE.Scene();scene.background=new THREE.Color(0x101020); /* ... (rest of scene setup as before) ... */
+const scene=new THREE.Scene();
+// scene.background=new THREE.Color(0x101020); // Set by skybox loader if successful, or remains this if not.
+// Check if skyboxTexture has loaded (it might not if paths are wrong or files missing)
+// However, the loader assigns a Texture object immediately, which might be empty until files load.
+// The assignment of scene.background is better done in the onLoad callback of the loader.
+// The onError callback handles the warning. The initial color is set as a fallback.
+scene.background = new THREE.Color(0x101020); // Default fallback, will be overwritten by skybox on successful load.
+// The 'if (skyboxTexture ...)' block is removed as assignment is now in onLoad.
+
 const camera=new THREE.PerspectiveCamera(75,window.innerWidth/window.innerHeight,0.1,1000);
+listener = new THREE.AudioListener();
+camera.add(listener);
+
 const renderer=new THREE.WebGLRenderer();renderer.setSize(window.innerWidth,window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; // Softer shadows
 document.body.appendChild(renderer.domElement);
 camera.position.set(0,2.5,4.5);camera.lookAt(0,TABLE_Y_SURFACE+0.1,0);
-const ambientLight=new THREE.AmbientLight(0x707070);scene.add(ambientLight);
-const directionalLight=new THREE.DirectionalLight(0xffffff,0.8);directionalLight.position.set(1,3,2);scene.add(directionalLight);
-const tableGeometry=new THREE.CylinderGeometry(TABLE_RADIUS,TABLE_RADIUS,TABLE_THICKNESS,64);
-const tableMaterial=new THREE.MeshStandardMaterial({color:0x005000});
-const tableMesh=new THREE.Mesh(tableGeometry,tableMaterial);tableMesh.position.y=TABLE_Y_SURFACE-(TABLE_THICKNESS/2);scene.add(tableMesh);
-directionalLight.target=tableMesh;
+
+// Adjusted Lights
+const ambientLight=new THREE.AmbientLight(0x505050); // Reduced intensity
+scene.add(ambientLight);
+
+const directionalLight=new THREE.DirectionalLight(0xffffff,1.0); // Increased intensity
+directionalLight.position.set(2, 4, 3); // Adjusted position
+directionalLight.castShadow = true;
+scene.add(directionalLight);
+
+// Directional Light Shadow Configuration
+directionalLight.shadow.camera.near = 0.5;
+directionalLight.shadow.camera.far = 15;
+directionalLight.shadow.camera.left = -7; // Wider to cover the whole table
+directionalLight.shadow.camera.right = 7;
+directionalLight.shadow.camera.top = 7;
+directionalLight.shadow.camera.bottom = -7;
+directionalLight.shadow.mapSize.width = 2048;
+directionalLight.shadow.mapSize.height = 2048;
+directionalLight.shadow.bias = -0.001; // Helps prevent shadow acne
+
+const hemisphereLight = new THREE.HemisphereLight(0xcccccc, 0x444444, 0.5); // skyColor, groundColor, intensity
+hemisphereLight.position.set(0, 10, 0);
+scene.add(hemisphereLight);
+
+// --- New Table Creation ---
+// 1. Load Textures (Wood texture loaded but not used in this step)
+const feltTexture = textureLoader.load('textures/table/felt.png',
+    (texture) => {
+        texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+        texture.repeat.set(0.05, 0.05); // Adjust repeat for felt pattern; may need tuning
+        console.log("Felt texture loaded successfully.");
+    },
+    undefined,
+    (err) => { console.warn("Failed to load felt texture 'textures/table/felt.png'. Using fallback color.", err); }
+);
+const woodTexture = textureLoader.load('textures/table/wood.png',
+    () => { console.log("Wood texture loaded successfully."); },
+    undefined,
+    (err) => { console.warn("Failed to load wood texture 'textures/table/wood.png'. Using fallback color.", err); }
+);
+
+// 2. Create Felt Top Shape
+const feltShape = new THREE.Shape();
+const arcRadius = BLACKJACK_TABLE_ARC_RADIUS;
+const straightEdgeLength = BLACKJACK_TABLE_STRAIGHT_EDGE;
+// const feltDepth = BLACKJACK_TABLE_FELT_THICKNESS; // Old constant for felt depth
+
+// Defines a D-shape: straight edge on positive Z, curved edge on negative Z.
+// Player side will be the straight edge. Dealer side will be the curve.
+// Origin (0,0) of the shape is the center of the straight edge.
+feltShape.moveTo(-straightEdgeLength / 2, 0); // Bottom-left of straight edge
+feltShape.lineTo(straightEdgeLength / 2, 0);   // Bottom-right of straight edge (Player's side)
+// Arc for the dealer side. Center of arc is (0,0). Radius is arcRadius.
+// It sweeps from angle 0 (positive X-axis) to PI (negative X-axis).
+// To make it point towards negative Z, we'll rotate the mesh later.
+feltShape.absarc(0, 0, arcRadius, 0, Math.PI, false);
+feltShape.closePath(); // Connects back to -straightEdgeLength / 2, 0
+
+// Create Table Body/Rim
+const tableBodyExtrudeSettings = { depth: BLACKJACK_TABLE_FULL_THICKNESS, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.04, bevelSegments: 3 };
+const tableBodyGeometry = new THREE.ExtrudeGeometry(feltShape, tableBodyExtrudeSettings);
+const woodMaterial = new THREE.MeshStandardMaterial({
+    map: woodTexture,
+    color: 0x4A3B31, // Fallback dark wood color
+    roughness: 0.7,
+    metalness: 0.3
+});
+const tableBodyMesh = new THREE.Mesh(tableBodyGeometry, woodMaterial);
+tableBodyMesh.castShadow = true; // The main body can cast shadows
+tableBodyMesh.receiveShadow = true;
+tableBodyMesh.rotation.x = -Math.PI / 2;
+tableBodyMesh.rotation.y = Math.PI;
+// Position the body so its top surface is at TABLE_Y_SURFACE
+tableBodyMesh.position.y = TABLE_Y_SURFACE - BLACKJACK_TABLE_FULL_THICKNESS / 2;
+scene.add(tableBodyMesh);
+
+// Create Felt Layer on top of the body
+const feltExtrudeSettings = { depth: BLACKJACK_TABLE_FELT_LAYER_THICKNESS, bevelEnabled: false }; // No bevel for thin felt
+const feltGeometry = new THREE.ExtrudeGeometry(feltShape, feltExtrudeSettings); // Use the same shape
+
+const feltMaterial = new THREE.MeshStandardMaterial({
+    map: feltTexture,
+    color: 0x00693E, // Darker green fallback color (Casino Green)
+    roughness: 0.9,
+    metalness: 0.1
+});
+const tableTopMesh = new THREE.Mesh(feltGeometry, feltMaterial); // This is now just the felt layer
+tableTopMesh.castShadow = false; // Felt itself doesn't cast much shadow
+tableTopMesh.receiveShadow = true; // Chips and cards cast shadows onto the felt
+
+// Position and Rotate the felt layer
+tableTopMesh.rotation.x = -Math.PI / 2;
+tableTopMesh.rotation.y = Math.PI;
+// Position the felt layer on top of the table body.
+// The top of tableBodyMesh is at TABLE_Y_SURFACE.
+// Felt layer's bottom should be at TABLE_Y_SURFACE.
+tableTopMesh.position.y = TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS / 2;
+scene.add(tableTopMesh);
+
+
+// --- Old Table (Commented Out) ---
+// const tableGeometry=new THREE.CylinderGeometry(TABLE_RADIUS,TABLE_RADIUS,TABLE_THICKNESS,64);
+// const tableMaterial=new THREE.MeshStandardMaterial({color:0x005000});
+// const tableMesh=new THREE.Mesh(tableGeometry,tableMaterial);tableMesh.position.y=TABLE_Y_SURFACE-(TABLE_THICKNESS/2);scene.add(tableMesh);
+// directionalLight.target=tableMesh;
+
+directionalLight.target = tableBodyMesh; // Target light at the main table body
+
+// Betting area - its Z position might need to be adjusted relative to the new table's straight edge.
+// The straight edge of the table is now at Z = 0 (local to table), after rotation Y by PI, it is world Z=0.
+// The betting area was at Z=0.9. This should still be okay, on the player side.
 const bettingAreaGeometry=new THREE.CylinderGeometry(BETTING_AREA_RADIUS,BETTING_AREA_RADIUS,BETTING_AREA_THICKNESS,64);
 const bettingAreaMaterial=new THREE.MeshStandardMaterial({color:0x222222,transparent:true,opacity:0.6});
-const bettingAreaMesh=new THREE.Mesh(bettingAreaGeometry,bettingAreaMaterial);bettingAreaMesh.position.set(0,BETTING_AREA_Y,0.9); scene.add(bettingAreaMesh);
+const bettingAreaMesh=new THREE.Mesh(bettingAreaGeometry,bettingAreaMaterial);
+// Position betting area on top of the felt.
+// The table's straight edge is now oriented along the world X-axis, at local Z=0.
+// After table rotations, this local Z=0 is aligned with world Z=0.
+// Player side should be slightly negative Z if camera is positive Z. Let's assume player side is at a small negative Z.
+const PLAYER_SIDE_Z_OFFSET = -0.2; // Players are on the "bottom" straight edge side of the D shape.
+bettingAreaMesh.position.set(0, TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + BETTING_AREA_THICKNESS / 2 + 0.001, PLAYER_SIDE_Z_OFFSET);
+scene.add(bettingAreaMesh);
 
 // --- Player Avatar and Marker Functions ---
-function createPlayerAvatar(seatIndex) { /* ... (as before) ... */
-    if (!baseSeatPositions[seatIndex]) return null;
+// Comment out old baseSeatPositions and dealerBasePosition as they are for the old cylindrical table
+// const baseSeatPositions = [ /* ... (as defined before) ... */
+//     new THREE.Vector3(-PLAYER_HAND_X_SPREAD * 2.2, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE + 0.3),
+//     new THREE.Vector3(-PLAYER_HAND_X_SPREAD * 1.1, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE),
+//     new THREE.Vector3(0,                           CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE - 0.1),
+//     new THREE.Vector3( PLAYER_HAND_X_SPREAD * 1.1, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE),
+//     new THREE.Vector3( PLAYER_HAND_X_SPREAD * 2.2, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE + 0.3),
+//     new THREE.Vector3( PLAYER_HAND_X_SPREAD * 0.0, CARD_Y_ON_TABLE, PLAYER_HAND_Z_BASE + 0.6)
+// ];
+// const dealerBasePosition = new THREE.Vector3(0, CARD_Y_ON_TABLE, -0.9); /* ... */
+
+
+function createPlayerAvatar(seatIndex) {
     const avatarMaterial = new THREE.MeshStandardMaterial({ color: 0x8888cc });
     const avatarGeometry = new THREE.CapsuleGeometry(0.2, 0.4, 4, 8);
     const avatarMesh = new THREE.Mesh(avatarGeometry, avatarMaterial);
-    const basePos = baseSeatPositions[seatIndex].clone();
-    avatarMesh.position.set(basePos.x, TABLE_Y_SURFACE + 0.4, basePos.z - 0.5);
+    avatarMesh.castShadow = true;
+    avatarMesh.receiveShadow = true;
+
+    // Calculate position based on new table shape
+    // Avatars are further back from the betting/card line on player side
+    const avatarZ = PLAYER_SIDE_Z_OFFSET - 0.3; // Further from table center than cards/bets
+    const totalSpreadWidth = BLACKJACK_TABLE_STRAIGHT_EDGE * 0.85; // Spread avatars along 85% of straight edge
+    let xPosAvatar;
+
+    if (maxPlayersAtTable <= 0) return null;
+    if (maxPlayersAtTable === 1 || seatIndex === undefined) { // seatIndex check for safety
+        xPosAvatar = 0;
+    } else {
+        // Spread avatars along the player side (straight edge)
+        // seatIndex 0 is left-most, maxPlayersAtTable-1 is right-most
+        xPosAvatar = -totalSpreadWidth / 2 + (seatIndex / (maxPlayersAtTable - 1)) * totalSpreadWidth;
+    }
+
+    avatarMesh.position.set(xPosAvatar, TABLE_Y_SURFACE + 0.2, avatarZ); // Y pos is half height of capsule approx.
     scene.add(avatarMesh);
     return avatarMesh;
 }
-function createActivePlayerMarker() { /* ... (as before) ... */
-    const markerGeometry = new THREE.TorusGeometry(0.45, 0.03, 8, 32);
+
+function createActivePlayerMarker() {
+    const markerGeometry = new THREE.TorusGeometry(0.35, 0.03, 8, 32); // Adjusted radius
     const markerMaterial = new THREE.MeshStandardMaterial({ color: 0xffdd00, emissive: 0xaa8800 });
     const markerMesh = new THREE.Mesh(markerGeometry, markerMaterial);
     markerMesh.rotation.x = Math.PI / 2; markerMesh.visible = false;
     scene.add(markerMesh);
     return markerMesh;
 }
-function updateActivePlayerMarker(seatIndex) { /* ... (as before) ... */
+
+function updateActivePlayerMarker(seatIndex) {
     if (!activePlayerMarker) activePlayerMarker = createActivePlayerMarker();
-    if (seatIndex !== null && seatIndex >= 0 && seatIndex < baseSeatPositions.length && baseSeatPositions[seatIndex]) {
-        const playerBasePos = baseSeatPositions[seatIndex].clone();
-        activePlayerMarker.position.set(playerBasePos.x + (CARD_WIDTH/2) - CARD_SPREAD_X_OFFSET/2 , TABLE_Y_SURFACE + 0.015, playerBasePos.z);
+
+    if (seatIndex !== null && seatIndex >= 0 && seatIndex < maxPlayersAtTable) {
+        // Calculate marker position based on player card area
+        const cardLineZ = PLAYER_SIDE_Z_OFFSET - 0.1; // Z for the line of cards
+        const totalSpreadWidth = BLACKJACK_TABLE_STRAIGHT_EDGE * 0.8; // Card spread
+        let xPosPlayer;
+
+        if (maxPlayersAtTable === 1) {
+            xPosPlayer = 0;
+        } else {
+            xPosPlayer = -totalSpreadWidth / 2 + (seatIndex / (maxPlayersAtTable -1)) * totalSpreadWidth;
+        }
+        // Approximate center of a hand for the marker
+        activePlayerMarker.position.set(xPosPlayer + CARD_WIDTH * 0.25, TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + 0.015, cardLineZ);
         activePlayerMarker.visible = true;
     } else {
         activePlayerMarker.visible = false;
@@ -153,7 +481,41 @@ function animate(){ /* ... (as before, handles 'deal' and 'flip') ... */
             if(obj.animationType==='deal'){
                 obj.mesh.position.lerp(obj.target,obj.speed);
                 if(obj.mesh.position.distanceTo(obj.target)<0.01){obj.mesh.position.copy(obj.target);obj.isAnimating=false;}
-            }else if(obj.animationType==='flip'){
+            } else if (obj.animationType === 'chip_bet_move') {
+                // Ensure targetPosition is defined
+                if (obj.targetPosition) {
+                    obj.mesh.position.lerp(obj.targetPosition, obj.speed);
+                    if (obj.mesh.position.distanceTo(obj.targetPosition) < 0.01) {
+                        obj.mesh.position.copy(obj.targetPosition);
+                        obj.isAnimating = false;
+                        // Specific for chip collection: remove mesh after animation
+                        if (obj.onComplete === 'remove') {
+                            scene.remove(obj.mesh);
+                            // Consider removing from animatedObjects array as well, or let the loop handle it now that isAnimating is false.
+                            // For simplicity, we'll let the main loop filter it out if it only processes isAnimating=true.
+                            // If animatedObjects can grow very large, explicit removal would be better.
+                        }
+                    }
+                } else {
+                    // If targetPosition is somehow undefined, stop animation to prevent errors
+                    obj.isAnimating = false;
+                    console.warn("Chip animation missing targetPosition", obj);
+                }
+            } else if (obj.animationType === 'chip_collect_move') { // Renamed from chip_bet_move for clarity
+                 if (obj.targetPosition) {
+                    obj.mesh.position.lerp(obj.targetPosition, obj.speed);
+                    if (obj.mesh.position.distanceTo(obj.targetPosition) < 0.01) {
+                        obj.mesh.position.copy(obj.targetPosition);
+                        obj.isAnimating = false;
+                        if (obj.onComplete === 'remove') {
+                            scene.remove(obj.mesh);
+                        }
+                    }
+                } else {
+                    obj.isAnimating = false;
+                    console.warn("Chip collection animation missing targetPosition", obj);
+                }
+            } else if(obj.animationType==='flip'){
                 obj.flipProgress++;
                 const easedProgress=obj.flipProgress/obj.flipDuration;
                 obj.mesh.rotation.y=THREE.MathUtils.lerp(obj.initialRotationY,obj.targetRotationY,easedProgress);
@@ -202,20 +564,69 @@ const tableStatusMessage=document.getElementById('table-status-message'); const 
 const placeBetButton=document.getElementById('place-bet-button'); const bettingControlsDiv=document.getElementById('betting-controls');
 
 // --- Helper Functions for Client-Side Display ---
-function clearTableVisuals() { /* ... (as before) ... */
+function animateChipsToDealer(chipsToAnimate) {
+    if (!chipsToAnimate || chipsToAnimate.length === 0) return;
+    // Optional: Play chip collection sound once for the batch
+    // playSound('sounds/chips_collect.mp3');
+
+    chipsToAnimate.forEach((chipMesh, index) => {
+        // Stagger the animation slightly for a nicer visual effect
+        const delay = index * 50; // 50ms delay between each chip animation start
+
+        setTimeout(() => {
+            const randomOffsetX = (Math.random() - 0.5) * CHIP_RADIUS * 2;
+            const randomOffsetZ = (Math.random() - 0.5) * CHIP_RADIUS * 2;
+            const finalTargetPos = DEALER_CHIP_COLLECT_TARGET_POS.clone().add(new THREE.Vector3(randomOffsetX, index * CHIP_HEIGHT * 0.1, randomOffsetZ));
+
+
+            animatedObjects.push({
+                mesh: chipMesh,
+                targetPosition: finalTargetPos,
+                isAnimating: true,
+                speed: 0.15, // Slightly faster for collection
+                animationType: 'chip_collect_move',
+                onComplete: 'remove'
+            });
+        }, delay);
+    });
+}
+
+function clearTableVisuals() {
     console.log("Clearing table visuals (cards, chips, avatars)...");
+
+    // Animate collection of old bet chips
+    let chipsToCollect = [];
     Object.values(playerMeshes).forEach(playerVisuals => {
+        if (playerVisuals.betChips && playerVisuals.betChips.length > 0) {
+            chipsToCollect.push(...playerVisuals.betChips);
+            playerVisuals.betChips = []; // Clear the array immediately after collecting for animation
+        }
+        // Clear card meshes for this player
         if (playerVisuals.hands) {
             playerVisuals.hands.forEach(handVisuals => {
-                if (handVisuals.cardMeshes) { handVisuals.cardMeshes.forEach(mesh => scene.remove(mesh)); }
+                if (handVisuals.cardMeshes) {
+                    handVisuals.cardMeshes.forEach(mesh => scene.remove(mesh));
+                }
             });
         }
-        if (playerVisuals.betChips) { playerVisuals.betChips.forEach(mesh => scene.remove(mesh)); }
-        if (playerVisuals.avatarMesh) { scene.remove(playerVisuals.avatarMesh); }
+        // Remove avatar mesh
+        if (playerVisuals.avatarMesh) {
+            scene.remove(playerVisuals.avatarMesh);
+        }
     });
-    playerMeshes = {};
-    if (dealerMeshes.cardMeshes) { dealerMeshes.cardMeshes.forEach(mesh => scene.remove(mesh));}
+
+    if (chipsToCollect.length > 0) {
+        animateChipsToDealer(chipsToCollect);
+    }
+
+    playerMeshes = {}; // Reset playerMeshes structure
+
+    // Clear dealer cards
+    if (dealerMeshes.cardMeshes) {
+        dealerMeshes.cardMeshes.forEach(mesh => scene.remove(mesh));
+    }
     dealerMeshes = { cardMeshes: [] };
+
     if (activePlayerMarker) activePlayerMarker.visible = false;
 }
 function displayLocalPlayerBetChips(betAmount, seatIndex) { /* ... (as before) ... */
@@ -224,58 +635,143 @@ function displayLocalPlayerBetChips(betAmount, seatIndex) { /* ... (as before) .
     else playerMeshes[seatIndex].betChips.forEach(m => scene.remove(m)); playerMeshes[seatIndex].betChips = [];
     if (betAmount <= 0) return;
     console.log(`Displaying 3D chips for local player (Seat ${seatIndex + 1}) bet: ${betAmount}`);
-    const BET_CHIP_Y = BETTING_AREA_Y + CHIP_HEIGHT / 2;
-    const bettingSpot = calculateBetPosition(seatIndex);
+    const BET_CHIP_Y_FINAL = TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + CHIP_HEIGHT / 2; // Adjusted Y for on-felt position
+    const bettingSpot = calculateBetPosition(seatIndex); // This is the FINAL position for the bottom chip of the stack
+
+    // Determine a start position for chips for this player seat
+    // For now, using a fixed offset from the betting spot, further away from table center.
+    // A more sophisticated approach might use a point near the player's avatar or edge of screen.
+    // Let's use a generic start position for now, and refine if needed.
+    // The PLAYER_SIDE_Z_OFFSET is -0.2. Player chip start should be further in -Z.
+    const chipAnimationStartPos = new THREE.Vector3(bettingSpot.x, TABLE_Y_SURFACE + 0.5, PLAYER_SIDE_Z_OFFSET - 1.0);
+
+
     let remainingAmount = betAmount;
     const chipDenominations = Object.keys(CHIP_VALUES_COLORS).map(Number).sort((a, b) => b - a);
     let currentStackHeightOffset = 0;
+
     for (const value of chipDenominations) {
         while (remainingAmount >= value) {
-            const chipMesh = createChipMesh(bettingSpot.x, BET_CHIP_Y + currentStackHeightOffset, bettingSpot.z, value);
+            // Create chip at the START position, but with its eventual stack height in Y
+            // The animation will handle the XZ movement. The Y should be its starting Y.
+            const startY = chipAnimationStartPos.y + currentStackHeightOffset;
+            const chipMesh = createChipMesh(chipAnimationStartPos.x, startY, chipAnimationStartPos.z, value);
+
             if (chipMesh) {
-                scene.add(chipMesh); playerMeshes[seatIndex].betChips.push(chipMesh);
-                remainingAmount -= value; currentStackHeightOffset += CHIP_HEIGHT;
+                // chipMesh.position.copy(chipAnimationStartPos); // Position is set in createChipMesh
+                scene.add(chipMesh);
+                playerMeshes[seatIndex].betChips.push(chipMesh);
+
+                const targetPosition = new THREE.Vector3(bettingSpot.x, BET_CHIP_Y_FINAL + currentStackHeightOffset, bettingSpot.z);
+                animatedObjects.push({
+                    mesh: chipMesh,
+                    targetPosition: targetPosition, // Use targetPosition for clarity
+                    isAnimating: true,
+                    speed: 0.12, // Adjust speed as needed (a bit faster than cards)
+                    animationType: 'chip_bet_move'
+                });
+                remainingAmount -= value;
+                currentStackHeightOffset += CHIP_HEIGHT;
             } else { break; }
         }
     }
-    if (playerMeshes[seatIndex].betChips.length > 0) playSound('sounds/chip_place.mp3');
+    if (playerMeshes[seatIndex].betChips.length > 0) {
+        // Play positional sound for the first chip in the stack when its animation starts
+        const firstChipMesh = playerMeshes[seatIndex].betChips[0];
+        if(firstChipMesh && firstChipMesh.isObject3D) {
+            playPositionalSound('sounds/chip_place.mp3', firstChipMesh, 0.5, false, 3, 2.5);
+        } else {
+            console.warn("Cannot attach positional sound to first chip: firstChipMesh is invalid.", firstChipMesh);
+            playSound('sounds/chip_place.mp3'); // Fallback to global sound
+        }
+    }
 }
-function displayRemotePlayerBetChips(betAmount, seatIndex) { /* ... (as before) ... */
+function displayRemotePlayerBetChips(betAmount, seatIndex) {
     console.log(`Seat ${seatIndex+1} bet ${betAmount}. Displaying their chips.`);
-    const seatBetPosition = calculateBetPosition(seatIndex);
+    const finalBettingSpot = calculateBetPosition(seatIndex); // Final XZ for bottom chip
+    const BET_CHIP_Y_FINAL_REMOTE = TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + CHIP_HEIGHT / 2;
+
+
     if (!playerMeshes[seatIndex]) playerMeshes[seatIndex] = { hands: [], betChips: [] };
     else if (!playerMeshes[seatIndex].betChips) playerMeshes[seatIndex].betChips = [];
     playerMeshes[seatIndex].betChips.forEach(m => scene.remove(m)); playerMeshes[seatIndex].betChips = [];
+
+    // Define a common start position for remote player chips (could be off-screen or a fixed point)
+    const remoteChipAnimationStartPos = new THREE.Vector3(finalBettingSpot.x, TABLE_Y_SURFACE + 0.5, PLAYER_SIDE_Z_OFFSET - 1.0); // Similar to local
+
     let remainingAmount = betAmount;
     const chipDenominations = Object.keys(CHIP_VALUES_COLORS).map(Number).sort((a, b) => b - a);
     let currentStackHeightOffset = 0;
+
     for (const value of chipDenominations) {
         while (remainingAmount >= value) {
-            const chipMesh = createChipMesh(seatBetPosition.x, seatBetPosition.y + CHIP_HEIGHT/2 + currentStackHeightOffset, seatBetPosition.z, value);
-            scene.add(chipMesh); playerMeshes[seatIndex].betChips.push(chipMesh);
-            remainingAmount -= value; currentStackHeightOffset += CHIP_HEIGHT;
+            const startY = remoteChipAnimationStartPos.y + currentStackHeightOffset;
+            const chipMesh = createChipMesh(remoteChipAnimationStartPos.x, startY, remoteChipAnimationStartPos.z, value);
+
+            scene.add(chipMesh);
+            playerMeshes[seatIndex].betChips.push(chipMesh);
+
+            const targetPosition = new THREE.Vector3(finalBettingSpot.x, BET_CHIP_Y_FINAL_REMOTE + currentStackHeightOffset, finalBettingSpot.z);
+            animatedObjects.push({
+                mesh: chipMesh,
+                targetPosition: targetPosition,
+                isAnimating: true,
+                speed: 0.12,
+                animationType: 'chip_bet_move'
+            });
+            remainingAmount -= value;
+            currentStackHeightOffset += CHIP_HEIGHT;
         }
     }
-     if (playerMeshes[seatIndex].betChips.length > 0) playSound('sounds/chip_place.mp3');
+    if (playerMeshes[seatIndex].betChips.length > 0) {
+        const firstChipMesh = playerMeshes[seatIndex].betChips[0];
+        if(firstChipMesh && firstChipMesh.isObject3D) {
+            playPositionalSound('sounds/chip_place.mp3', firstChipMesh, 0.5, false, 3, 2.5);
+        } else {
+            console.warn("Cannot attach positional sound to first remote chip: firstChipMesh is invalid.", firstChipMesh);
+            playSound('sounds/chip_place.mp3'); // Fallback to global sound
+        }
+    }
 }
-function calculateBetPosition(seatIndex) { /* ... (as before) ... */
+function calculateBetPosition(seatIndex) {
+    const betY = TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + BETTING_AREA_THICKNESS / 2 + 0.002; // On top of felt
     if (seatIndex === null || seatIndex === undefined || seatIndex < 0 || seatIndex >= maxPlayersAtTable) {
-        return new THREE.Vector3(0, BETTING_AREA_Y + BETTING_AREA_THICKNESS/2, 0.9);
+        return new THREE.Vector3(0, betY, PLAYER_SIDE_Z_OFFSET); // Default central position on player side
     }
-    const numEffectivePlayersForArc = Math.max(1, maxPlayersAtTable -1);
-    const angleBetweenSeats = (Math.PI * 0.7) / numEffectivePlayersForArc;
-    const tableEdgeRadius = TABLE_RADIUS - 0.8;
-    const startingAngle = (Math.PI / 2) - ((Math.PI * 0.7) / 2);
-    const angle = startingAngle + seatIndex * angleBetweenSeats;
-    return new THREE.Vector3( Math.cos(angle) * tableEdgeRadius, BETTING_AREA_Y + BETTING_AREA_THICKNESS/2, Math.sin(angle) * tableEdgeRadius * 0.5 + 0.6);
+
+    const totalSpreadWidth = BLACKJACK_TABLE_STRAIGHT_EDGE * 0.8; // Use 80% of straight edge for bets
+    let xPos;
+
+    if (maxPlayersAtTable === 1) {
+        xPos = 0;
+    } else {
+         // seatIndex 0 is left-most, maxPlayersAtTable-1 is right-most from player's perspective (table Y rotation is PI)
+        xPos = -totalSpreadWidth / 2 + (seatIndex / (maxPlayersAtTable - 1)) * totalSpreadWidth;
+    }
+    return new THREE.Vector3(xPos, betY, PLAYER_SIDE_Z_OFFSET);
 }
-function calculateCardPosition(seatOrActor, handIndex, cardIndex, isDealerOrUpcard) { /* ... (as before) ... */
-    let basePosition; const cardY = TARGET_CARD_Y_ON_TABLE;
-    if (seatOrActor === 'dealer') { basePosition = dealerBasePosition.clone(); }
-    else {
-        if (seatOrActor >= 0 && seatOrActor < baseSeatPositions.length) { basePosition = baseSeatPositions[seatOrActor].clone(); }
-        else { basePosition = new THREE.Vector3(0, cardY, 1.2); }
+
+function calculateCardPosition(seatOrActor, handIndex, cardIndex, isDealerOrUpcard) {
+    const cardY = TABLE_Y_SURFACE + BLACKJACK_TABLE_FELT_LAYER_THICKNESS + CARD_DEPTH / 2 + 0.005; // On top of felt
+    let basePosition;
+
+    if (seatOrActor === 'dealer') {
+        // Dealer position centered on the arc side (positive Z relative to table center after rotations)
+        const dealerZ = BLACKJACK_TABLE_ARC_RADIUS * 0.45; // Closer to center of arc
+        basePosition = new THREE.Vector3(0, cardY, dealerZ);
+    } else { // Player
+        const playerCardLineZ = PLAYER_SIDE_Z_OFFSET - 0.05; // Slightly behind bet position
+        const totalSpreadWidth = BLACKJACK_TABLE_STRAIGHT_EDGE * 0.8;
+        let xPosPlayer;
+
+        if (maxPlayersAtTable === 1 || seatOrActor < 0 || seatOrActor >= maxPlayersAtTable) { // seatOrActor is seatIndex for players
+            xPosPlayer = 0; // Fallback or single player
+        } else {
+            xPosPlayer = -totalSpreadWidth / 2 + (seatOrActor / (maxPlayersAtTable - 1)) * totalSpreadWidth;
+        }
+        basePosition = new THREE.Vector3(xPosPlayer, cardY, playerCardLineZ);
     }
+    // Apply hand spread (for split hands) and card spread within a hand
     basePosition.x += handIndex * HAND_SPREAD_X_OFFSET;
     const xOffset = cardIndex * CARD_SPREAD_X_OFFSET;
     return new THREE.Vector3(basePosition.x + xOffset, cardY, basePosition.z);
@@ -553,6 +1049,45 @@ window.addEventListener('DOMContentLoaded', () => { /* ... (as before) ... */
         uiUpdaters.updateButtons({canHit:false, canStand:false, canDouble:false, canSplit:false, canSurrender:false, showNewGame:true});
     }
     if(playerBalanceAmountSpan) playerBalanceAmountSpan.textContent = clientGameData.playerBalance;
+
+    // Ambient Sound Setup
+    if (listener) { // Ensure listener is initialized
+        const ambientSound = new THREE.Audio(listener);
+        const audioLoaderAmbient = new THREE.AudioLoader(); // Use a new loader instance or ensure no conflicts
+
+        audioLoaderAmbient.load('sounds/ambient_casino.mp3', function(buffer) {
+            if (audioBufferCache['sounds/ambient_casino.mp3']) {
+                 ambientSound.setBuffer(audioBufferCache['sounds/ambient_casino.mp3']);
+            } else {
+                audioBufferCache['sounds/ambient_casino.mp3'] = buffer;
+                ambientSound.setBuffer(buffer);
+            }
+            ambientSound.setLoop(true);
+            ambientSound.setVolume(0.15); // Subtle volume for ambient sound
+
+            // Attempt to play. Handle potential browser restrictions on autoplay.
+            try {
+                // Check context state, try to resume if suspended (common requirement for autoplay)
+                if (listener.context.state === 'suspended') {
+                    listener.context.resume().then(() => {
+                        console.log("AudioContext resumed successfully for ambient sound.");
+                        ambientSound.play();
+                        console.log("Ambient sound playing.");
+                    }).catch(e => console.warn("Error resuming AudioContext for ambient sound:", e));
+                } else {
+                    ambientSound.play();
+                    console.log("Ambient sound playing.");
+                }
+            } catch (e) {
+                console.warn("Error trying to play ambient_casino.mp3 automatically:", e);
+            }
+
+        }, undefined, function(err) {
+            console.warn("Failed to load ambient sound 'sounds/ambient_casino.mp3':", err);
+        });
+    } else {
+        console.warn("AudioListener not available for ambient sound setup.");
+    }
 });
 hitButton.addEventListener('click',()=>{if(socket && socket.connected && clientGameData.activeHandIndex !== undefined) socket.emit('player_action', {action: 'hit', handIndex: clientGameData.activeHandIndex }); disableAllActionButtons();});
 standButton.addEventListener('click',()=>{if(socket && socket.connected && clientGameData.activeHandIndex !== undefined) socket.emit('player_action', {action: 'stand', handIndex: clientGameData.activeHandIndex }); disableAllActionButtons();});

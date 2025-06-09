@@ -1,0 +1,4 @@
+Placeholder for card slide sound effect.
+This file is a placeholder. Please replace it with an actual audio file (e.g., a short sound of a card sliding across a felt table) for the game's audio feedback.
+Ensure the sound effect is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'sounds/card_slide.mp3' for card dealing animations.

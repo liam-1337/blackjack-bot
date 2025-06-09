@@ -1,0 +1,4 @@
+Placeholder for skybox positive Y texture.
+This file is a placeholder. Please replace it with an actual image file for the positive Y face of the skybox.
+Ensure the image is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'textures/skybox/py.png'.

@@ -1,0 +1,4 @@
+Placeholder for ambient casino sound effect.
+This file is a placeholder. Please replace it with an actual looping audio file (e.g., subtle casino chatter, distant slot machine sounds) for the game's background ambiance.
+Ensure the sound effect is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'sounds/ambient_casino.mp3'.

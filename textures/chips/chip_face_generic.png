@@ -1,0 +1,4 @@
+Placeholder for generic chip face texture.
+This file is a placeholder. Please replace it with an actual image file (e.g., a subtle noisy texture or a plain design suitable for a poker chip face that can be tinted by color) for the blackjack chip visuals.
+Ensure the image is royalty-free if used in a production environment.
+The game code (js/main.js) attempts to load 'textures/chips/chip_face_generic.png'.
