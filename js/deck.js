@@ -1,140 +1,85 @@
-// js/deck.js - Defines Card and Deck classes for a card game.
+// js/deck.js (Client-Side Version)
+"use strict";
 
-// Define standard suits and ranks for playing cards.
-const SUITS = ["Hearts", "Diamonds", "Clubs", "Spades"];
-const RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "Jack", "Queen", "King", "Ace"];
-
-/**
- * Represents a single playing card.
- */
 class Card {
-    /**
-     * Creates a card instance.
-     * @param {string} suit - The suit of the card (e.g., "Hearts").
-     * @param {string} rank - The rank of the card (e.g., "Ace", "10", "King").
-     */
     constructor(suit, rank) {
         this.suit = suit;
         this.rank = rank;
-        this.faceTexturePath = this._getFaceTexturePath();
+        this.value = this._getValue();
+        // faceTexturePath is primarily driven by server data if this class is used for anything.
+        // createCardMesh in main.js now directly uses plain card objects from server
+        // which should include faceTexturePath. This method is mostly for reference client-side.
+        // this.faceTexturePath = this._getFaceTexturePath();
     }
 
-    /**
-     * Generates the expected file path for the card's face texture.
-     * Assumes a convention like "textures/cards/faces/AS.png" (Ace of Spades).
-     * For Ten, it uses 'T' (e.g., "TS.png").
-     * @returns {string} The path to the face texture.
-     * @private
-     */
-    _getFaceTexturePath() {
-        // Rank mapping: '2'..'9', 'T' (for 10), 'J', 'Q', 'K', 'A'
-        let rankFile;
-        if (this.rank === "10") {
-            rankFile = "T";
-        } else if (["Jack", "Queen", "King", "Ace"].includes(this.rank)) {
-            rankFile = this.rank.charAt(0).toUpperCase();
+    _getValue() {
+        if (['Jack', 'Queen', 'King'].includes(this.rank)) {
+            return 10;
+        } else if (this.rank === 'Ace') {
+            return 11;
         } else {
-            rankFile = this.rank; // "2" through "9"
+            return parseInt(this.rank);
         }
-        // Suit mapping: 'H', 'D', 'C', 'S'
+    }
+
+    // This method might be primarily for reference if server sends full texture path
+    // or if createCardMesh directly constructs path from rank/suit plain object.
+    _getFaceTexturePath() {
+        const rankFile = (this.rank === '10') ? 'T' : (this.rank.length > 1 ? this.rank.charAt(0).toUpperCase() : this.rank);
         const suitChar = this.suit.charAt(0).toUpperCase();
         return `textures/cards/faces/${rankFile}${suitChar}.png`;
     }
 
-    /**
-     * Returns a string representation of the card.
-     * @returns {string} e.g., "Ace of Spades".
-     */
     toString() {
         return `${this.rank} of ${this.suit}`;
     }
 
-    /**
-     * Gets the Blackjack value of the card.
-     * Face cards (Jack, Queen, King) are 10. Ace is 11 by default.
-     * Numbered cards are their face value.
-     * Note: Ace as 1 or 11 logic is handled by hand value calculation in Game.js.
-     * @returns {number} The Blackjack value of the card.
-     */
-    getValue() {
-        if (["Jack", "Queen", "King"].includes(this.rank)) {
-            return 10;
-        }
-        if (this.rank === "Ace") {
-            return 11; // Default Ace value
-        }
-        return parseInt(this.rank); // For ranks "2" through "10"
-    }
+    // toPlainObject() is primarily for server-side to prepare data for client.
+    // Client-side Card instances might not need to call this if they are created from plain objects.
 }
 
-/**
- * Represents a deck of playing cards.
- */
 class Deck {
-    /**
-     * Creates a new deck, optionally with multiple 52-card packs.
-     * @param {number} [numPacks=1] - The number of standard 52-card packs to include in this deck.
-     */
-    constructor(numPacks = 1) { // numPacks will be used by createDeck
+    constructor(numPacks = 1) {
+        this.suits = ['Hearts', 'Diamonds', 'Clubs', 'Spades'];
+        this.ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'Jack', 'Queen', 'King', 'Ace'];
         this.cards = [];
-        // this.numPacks = numPacks; // Store if needed, but createDeck will use its param
-        this.createDeck(numPacks); // Pass numPacks to createDeck
-        // Note: Shuffling is typically done after creation, e.g., in Game.js constructor.
+        // Client-side deck is not used for dealing logic in the multiplayer setup.
+        // It's kept minimal here in case any client-side utility still needs it,
+        // but likely it can be omitted from a final client build if main.js
+        // exclusively uses card data from the server.
+        // if (numPacks > 0) {
+        //     // this.createDeck(numPacks); // Don't auto-create on client unless specifically needed
+        // }
     }
 
-    /**
-     * Populates the deck with cards from the specified number of packs.
-     * Clears any existing cards before creating the new set.
-     * @param {number} [numPacks=1] - The number of 52-card packs to create.
-     */
-    createDeck(numPacks = 1) { // Accepts numPacks parameter
+    createDeck(numPacks = 1) {
         this.cards = [];
-        for (let i = 0; i < numPacks; i++) { // Loop numPacks times
-            for (const suit of SUITS) {
-                for (const rank of RANKS) {
+        for (let i = 0; i < numPacks; i++) {
+            for (const suit of this.suits) {
+                for (const rank of this.ranks) {
                     this.cards.push(new Card(suit, rank));
                 }
             }
         }
     }
 
-    /**
-     * Shuffles the cards in the deck using the Fisher-Yates algorithm.
-     */
     shuffle() {
         for (let i = this.cards.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
-            [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]]; // Swap elements
+            [this.cards[i], this.cards[j]] = [this.cards[j], this.cards[i]];
         }
     }
 
-    /**
-     * Deals (removes and returns) the top card from the deck.
-     * @returns {Card|null} The card dealt, or null if the deck is empty.
-     */
     dealCard() {
-        if (this.cards.length === 0) {
-            console.warn("Deck is empty! Cannot deal card.");
-            // In a real game, might trigger reshuffle of a discard pile or end game.
-            return null;
+        if (this.cards.length > 0) {
+            return this.cards.pop();
         }
-        return this.cards.pop();
-    }
-
-    /**
-     * Returns the number of cards currently remaining in the deck.
-     * @returns {number} The count of remaining cards.
-     */
-    cardsRemaining() {
-        return this.cards.length;
-    }
-
-    /**
-     * Checks if the deck has at least a certain number of cards remaining.
-     * @param {number} count - The number of cards to check for.
-     * @returns {boolean} True if there are enough cards, false otherwise.
-     */
-    hasEnoughCards(count) {
-        return this.cards.length >= count;
+        return null;
     }
 }
+
+// Note: This client-side version of deck.js is significantly simplified
+// as the authoritative deck and game logic now reside on the server.
+// Its inclusion in a production client build should be evaluated based on actual usage
+// in main.js (e.g., if main.js instantiates Card objects for some display purpose).
+// Currently, main.js's createCardMesh takes plain objects from the server.

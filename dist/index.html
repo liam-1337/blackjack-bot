@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multiplayer Blackjack 3D - Dist</title>
+    <link rel="stylesheet" href="css/style.min.css">
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #111; color: #fff; font-family: Arial, sans-serif; }
+        canvas { display: block; }
+        .info-panel {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #555;
+            color: #eee;
+            font-size: 0.9em;
+        }
+        /* Add other critical UI element styles that were in the main HTML style tag or ensure they are in style.min.css */
+        #player-list-panel { top: 10px; right: 10px; width: 220px; max-height: 180px; overflow-y: auto; }
+        #player-list { list-style-type: none; padding: 0; margin: 0; }
+        #player-list li { padding: 3px 5px; border-bottom: 1px solid #555; font-size: 0.9em; }
+        #player-list li:last-child { border-bottom: none; }
+        #player-list .current-player-highlight { font-weight: bold; color: #ffc107; background-color: #3a3f47;}
+        #player-list li.remote-active-player-highlight { background-color: #4a5568; color: #e2e8f0; }
+        #message-area { bottom: 10px; left: 10px; width: 300px; max-width: 40%; }
+        #game-log-content { max-height: 120px; overflow-y: scroll; padding: 5px; border: 1px solid #444; background-color: #282c34; font-size: 0.85em; line-height: 1.4; }
+        #game-log-content p { margin: 0 0 3px 0; padding: 0; word-wrap: break-word; }
+        #player-balance-panel { top: 10px; left: 10px; }
+        #sound-controls-panel { top: 200px; right: 10px; width: 220px; }
+        #action-buttons { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: block; text-align: center; }
+        #action-buttons button, #insurance-prompt button { padding: 8px 15px; margin: 5px; border-radius: 5px; border:none; cursor:pointer; color:white; }
+        #betting-controls input { width: 80px; margin-right: 5px; padding: 5px; }
+        #insurance-prompt { display: none; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: rgba(0,0,0,0.85); padding: 20px; border-radius: 8px; border: 1px solid #777; text-align: center; z-index: 100; }
+        #insurance-bet-info { display: none; bottom: 80px; left: 10px; }
+        #player-info { bottom: 150px; left: 10px; min-width:200px; }
+        #dealer-info { top: 10px; left: 50%; transform: translateX(-50%); }
+        .player-hand-display { border: 1px solid #ccc; padding: 5px; margin-bottom: 5px; border-radius: 3px; background-color: rgba(255,255,255,0.1); }
+        .player-hand-display.active { border-color: #ffc107; background-color: rgba(255,243,205,0.3); color: #000; }
+        .player-hand-display.active p, .player-hand-display.active h5 { color: #000; }
+        .player-hand-display p { margin: 2px 0; font-size: 0.9em; }
+        .player-hand-display h5 { margin: 3px 0 2px 0; font-size: 0.95em;}
+
+    </style>
+</head>
+<body>
+    <div id="player-list-panel" class="info-panel">
+        <h4>Players at Table</h4>
+        <ul id="player-list"></ul>
+        <p id="table-status-message"></p>
+    </div>
+    <div id="message-area" class="info-panel">
+        <h4>Game Log</h4>
+        <div id="game-log-content"></div>
+    </div>
+    <div id="player-balance-panel" class="info-panel">
+        Player Balance: <span id="player-balance-amount">0</span>
+    </div>
+    <div id="sound-controls-panel" class="info-panel">
+        <h4>Sound Options</h4>
+        <button id="toggle-ambient-button">Ambient: OFF</button>
+        <button id="toggle-music-button">Music: OFF</button>
+    </div>
+    <div id="action-buttons">
+        <button id="new-game-button">New Game / Ready</button>
+        <div id="betting-controls" style="display:none;">
+            <input type="number" id="bet-amount-input" value="10" min="5" step="5">
+            <button id="place-bet-button">Place Bet</button>
+        </div>
+        <button id="hit-button" style="display:none;">Hit</button>
+        <button id="stand-button" style="display:none;">Stand</button>
+        <button id="double-button" style="display:none;">Double</button>
+        <button id="split-button" style="display:none;">Split</button>
+        <button id="surrender-button" style="display:none;">Surrender</button>
+    </div>
+    <div id="insurance-prompt">
+        <p id="insurance-prompt-message">Dealer shows an Ace. Take Insurance?</p>
+        <p>Cost: <span id="insurance-cost-text">0</span></p>
+        <button id="take-insurance-button">Take Insurance</button>
+        <button id="decline-insurance-button">Decline</button>
+    </div>
+    <div id="insurance-bet-info" class="info-panel">
+        Insurance Bet: <span id="insurance-bet-amount">0</span>
+    </div>
+    <div id="player-info" class="info-panel">
+        <h4>Your Hands:</h4>
+        <div id="player-hands-container"></div>
+    </div>
+    <div id="dealer-info" class="info-panel">
+        <h4>Dealer:</h4>
+        <p>Cards: <span id="dealer-cards"></span></p>
+        <p>Score: <span id="dealer-value">0</span></p>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/main.min.js" defer></script>
+</body>
+</html>
